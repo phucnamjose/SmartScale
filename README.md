@@ -1,0 +1,2 @@
+# SmartScale
+HG Solution
