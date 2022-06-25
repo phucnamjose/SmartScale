@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <EEPROM.h>
+#include <SoftwareSerial.h>
 
 #define CUR_SCREEN 0
 #define EXPECTED_SCREEN 1
@@ -18,11 +19,16 @@
 #define STOP_KEY 'D'
 #define START_KEY 'C'
 #define DP_KEY '*'
-#define RELAY1_PIN 18
-#define RELAY2_PIN 19
+// #define RELAY1_PIN A2
+// #define RELAY2_PIN A1
+#define RELAY1_PIN 11
+#define RELAY2_PIN 12
+#define LED_START 10
+#define LED_STOP 11
+#define BUZZ 12
+#define rxPin 13
+#define txPin A0
 
-#define START_PIN 0
-#define STOP_PIN 4
 #define TRIGGER_LEVEL LOW
 
 #define STOP_STATE 0
@@ -31,6 +37,7 @@
 #define MAX_COUNT 100
 #define CONFIRMED_COUNT 10
 #define SD_CS 15
+
 
 byte key = NO_KEY;
 const byte ROWS = 4; // four rows
@@ -42,41 +49,36 @@ char keys[ROWS][COLS] = {
         {'*', '0', '#', 'D'}
         };
 
-byte rowPins[ROWS] = {36, 39, 34, 35}; // connect to the row pinouts of the keypad
-byte colPins[COLS] = {32, 33, 25, 23}; // connect to the column pinouts of the keypad
+byte rowPins[ROWS] = {9, 8, 7, 6}; // connect to the row pinouts of the keypad
+byte colPins[COLS] = {5, 4, 3, 2}; // connect to the column pinouts of the keypad
 
 Keypad my_keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
+enum Mode
+{
+  MODE_A = 0,
+  MODE_B
+};
+
 struct device_params
 {
-  float cur_weight = 12345.67;
-  float expected_weight = 112233.44;
+  float cur_weight = 0;
+  float expected_weight = 0;
   String FullTime, monthStamp, dayStamp, timeStamp, event;
   int state_run_stop = STOP_STATE;
-  int state_in_out = 1;
+  Mode mode = MODE_A;
   uint8_t flag_send = 3;
 } DeviceParams;
 int num_dp = 2;
 bool input_dp = false;
-float input_a = 10;
-float input_b = 1;
+float input_a = 10;float input_b = 1;
 uint8_t mode_run = '\0';
 float weight[3] = {1, 2, 3};
 uint8_t count_get_weight = 0;
-LiquidCrystal_I2C lcd(0x38, 16, 2);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+SoftwareSerial mySerial (rxPin, txPin);
 
-enum BtnState
-{
-  BTN_STATE_00 = 0,
-  BTN_STATE_01,
-  BTN_STATE_10,
-  BTN_STATE_11
-};
-
-BtnState btn_state = BTN_STATE_00;
 int btn_count = 0;
-// state_in_out = 1;
-// int state_run_stop = STOP_STATE;
 long last_force_stop = 0;
 
 long last_show_cur_weight = 0;
@@ -89,20 +91,27 @@ int msg_len = 0;
 /********** Display running mode **********/
 void show_mode() {
   // lcd.setCursor(10,EXPECTED_SCREEN);
-  lcd.setCursor(8, 2);
+  
   switch (EEPROM.read(5)) {
   case 'A':
   {
-    lcd.print("A-BOM VAO");
+    lcd.setCursor(0, 0);
+    lcd.print("A-BOM");
+    lcd.setCursor(0, 1);
+    lcd.print("     ");
     break;
   }
   case 'B':
   {
-    lcd.print("B-HUT RA ");
+    lcd.setCursor(0, 0);
+    lcd.print("     ");
+    lcd.setCursor(0, 1);
+    lcd.print("B-HUT ");
     break;
   }
   default:
   {
+    lcd.setCursor(0, 0);
     lcd.print("CHUA CHON");
     break;
   }
@@ -114,7 +123,7 @@ void reset_state_in() {
   input_dp = false;
   input_a = 10;
   input_b = 1;
-  DeviceParams.state_in_out = 1;
+  DeviceParams.mode = MODE_A;
 }
 /********** Reset status device when press key B **********/
 void reset_state_out() {
@@ -122,7 +131,7 @@ void reset_state_out() {
   input_dp = false;
   input_a = 10;
   input_b = 1;
-  DeviceParams.state_in_out = -1;
+  DeviceParams.mode = MODE_B;
 }
 /********** Dispaly device status **********/
 
@@ -141,12 +150,10 @@ void show_state() {
   }
 }
 /********** On Relay **********/
-void onRelay(int x) {
-  if (x == 1) {
+void onRelay() {
     digitalWrite(RELAY1_PIN, TRIGGER_LEVEL);
-  } else if (x == 2) {
-    digitalWrite(RELAY2_PIN, HIGH - TRIGGER_LEVEL);
-  }
+    digitalWrite(RELAY2_PIN, TRIGGER_LEVEL);
+    Serial.println("ON RELAY");
 }
 
 /********** Convert float number to String and show **********/
@@ -157,7 +164,7 @@ void show_float(int addr, float x) {
     s.remove(0, 1);
   }
   sprintf(cs, "%9s kg", s.c_str());
-  lcd.setCursor(8, addr);
+  lcd.setCursor(6, addr);
   lcd.print(cs);
   if (addr == CUR_SCREEN) {
     last_show_cur_weight = millis();
@@ -166,13 +173,19 @@ void show_float(int addr, float x) {
 
 void setup() {
   Serial.begin(9600);
+  mySerial.begin(9600);
+  lcd.init();
+  // Print a message to the LCD.
+  lcd.backlight();
+  show_mode();
 }
 /********** Get data and parse from Ampcells Scale Indicator **********/
 bool update_cur_weight() {
   char c;
   bool new_msg = false;
-  while (Serial.available()) {
-    c = Serial.read();
+  //Read string from scale indicator
+  while (mySerial.available()) {
+    c = mySerial.read();
 
     if (c == 10 || c == 13) {
       new_msg = true;
@@ -195,6 +208,7 @@ bool update_cur_weight() {
       num_s[NEG_POS + NUM_LEN + 1] = 0;
       weight[count_get_weight] = atof(num_s);
       count_get_weight += 1;
+
       if (count_get_weight == 3) {
         if (weight[0] == weight[1] && weight[1] == weight[2]) {
           DeviceParams.cur_weight = weight[2];
@@ -224,83 +238,27 @@ bool update_cur_weight() {
   }
   return false;
 }
-/********** Check have press Start/Stop Button **********/
-void update_btn_state() {
-  // int v = analogRead(btn_pin);
-  uint8_t v = digitalRead(START_PIN);
-  v = v << 1;
-  v += digitalRead(STOP_PIN);
-  // StartPin=1 & StopPin=1
-  if (v == 3) {
-    if (btn_state != BTN_STATE_00) {
-      btn_state = BTN_STATE_00;
-      btn_count = 0;
-    } else if (btn_count < MAX_COUNT) {
-      btn_count += 1;
-    }
-  } else if (v == 2) {
-    if (btn_state != BTN_STATE_01) {
-      btn_state = BTN_STATE_01;
-      btn_count = 0;
-    } else if (btn_count < MAX_COUNT) {
-      btn_count += 1;
-    }
-  } else if (v == 1) {
-    if (btn_state != BTN_STATE_10) {
-      btn_state = BTN_STATE_10;
-      btn_count = 0;
-    } else if (btn_count < MAX_COUNT) {
-      btn_count += 1;
-    }
-  } else {
-    if (btn_state != BTN_STATE_11) {
-      btn_state = BTN_STATE_11;
-      btn_count = 0;
-    } else if (btn_count < MAX_COUNT) {
-      btn_count += 1;
-    }
-  }
-  // PrintBtnState();
-}
 /********** Turn off relay **********/
-void offRelay(int x) {
-  if (x == 1) {
-    digitalWrite(RELAY1_PIN, HIGH - TRIGGER_LEVEL);
-  } else if (x == 2) {
-    digitalWrite(RELAY2_PIN, TRIGGER_LEVEL);
-  }
+void offRelay() {
+    digitalWrite(RELAY1_PIN, HIGH);
+    delay(500);
+    digitalWrite(RELAY2_PIN, HIGH);
+    Serial.println("OFF RELAY");
 }
 /********** Stop device **********/
 void force_stop() {
-  offRelay(2);
+  offRelay();
   if (DeviceParams.state_run_stop == RUN_STATE) { // get_time();
     DeviceParams.flag_send = SEND_STOP;
     DeviceParams.state_run_stop = STOP_STATE;
-    DeviceParams.cur_weight -= 0.4;
-    if (1) {
-      Serial.print("KL send in time stop task loop:");
-      Serial.println(DeviceParams.cur_weight);
-      // DeviceParams.flag_send = SEND_IDLE;
-    } else {
-      Serial.print("KL send in time stop task loop:");
-      Serial.println(DeviceParams.cur_weight);
-      Serial.println(DeviceParams.flag_send);
-    }
+  
+    Serial.print("KL send in time stop task loop:");
+    Serial.println(DeviceParams.cur_weight);
   }
 }
-/********** Get START and STOP button **********/
-char get_extra_keys() {
-  if ((btn_state == BTN_STATE_10) && (btn_count > CONFIRMED_COUNT) && (btn_count <= MAX_COUNT + 1)) {
-    btn_count = 2 * MAX_COUNT;
-    return START_KEY;
-  } else if ((btn_state == BTN_STATE_01) && (btn_count > CONFIRMED_COUNT) && (btn_count <= MAX_COUNT + 1)) {
-    btn_count = 2 * MAX_COUNT;
-    return STOP_KEY;
-  } else
-    return NO_KEY;
-}
+
 bool check_cond_stop() {
-  if (DeviceParams.state_in_out > 0) { // bom vao
+  if (DeviceParams.mode == MODE_A) { // bom vao
     if (DeviceParams.cur_weight >= DeviceParams.expected_weight) {
       return true;
     }
@@ -309,11 +267,6 @@ bool check_cond_stop() {
       return true;
     }
   }
-
-  // if ((btn_state == BTN_STATE_01) && (btn_count > CONFIRMED_COUNT))
-  // {
-  //   return true;
-  // }
   return false;
 }
 
@@ -322,31 +275,26 @@ void start_run() {
   if (check_cond_stop()) {
     return;
   }
-  if (DeviceParams.state_run_stop == STOP_STATE) { // get_time();
+  if (DeviceParams.state_run_stop == STOP_STATE) {
     DeviceParams.flag_send = SEND_START;
     DeviceParams.state_run_stop = RUN_STATE;
-    if (1) {
-      Serial.print("KL send in time stop task loop:");
-      Serial.println(DeviceParams.cur_weight);
-    } else {
-      Serial.print("KL send in time stop task loop:");
-      Serial.println(DeviceParams.cur_weight);
-      Serial.println(DeviceParams.flag_send);
-    }
+    //Update weight to EEPROM
     if (DeviceParams.expected_weight != EEPROM.read(0)) {
       EEPROM.write(0, DeviceParams.expected_weight);
     }
   }
 
   show_state();
-  onRelay(2);
+  onRelay();
 }
 /********** Get button **********/
 bool update_key(char key) {
+  //Press C on keypad and state is running
   if ((key == STOP_KEY) && (DeviceParams.state_run_stop == RUN_STATE)) {
     force_stop();
     return true;
   }
+  //Press A to choose mode A: "BOM"
   if (key == RESET_KEYA) {
     force_stop();
     reset_state_in();
@@ -354,6 +302,7 @@ bool update_key(char key) {
     show_mode();
     return true;
   }
+  //Press B to choose mode B: "HUT"
   if (key == RESET_KEYB) {
     force_stop();
     reset_state_out();
@@ -379,6 +328,7 @@ bool update_key(char key) {
   }
 
   if (isDigit(key)) {
+    //Allow input decimal value
     DeviceParams.expected_weight = DeviceParams.expected_weight * input_a + (key - '0') * input_b;
     if (input_dp) {
       input_b = input_b / 10;
@@ -391,19 +341,16 @@ bool update_key(char key) {
   return false;
 }
 void loop() {
-
+  
+  //update weight and show on LCD
   if (update_cur_weight()) {
     if (millis() - last_show_cur_weight > 150) {
       show_float(CUR_SCREEN, DeviceParams.cur_weight);
     }
   }
-
+  
+  //Read value from keypad
   key = my_keypad.getKey();
-  update_btn_state();
-
-  if (key == NO_KEY) {
-    key = get_extra_keys();
-  }
 
   if (key != NO_KEY) {
     if (update_key(key)) {
@@ -416,5 +363,5 @@ void loop() {
       force_stop();
     }
   }
-  show_state();
+  //show_state();
 }
