@@ -1,24 +1,24 @@
 #include <Arduino.h>
-
 #include <Keypad.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 
+/* LCD */
 #define CUR_SCREEN 0
 #define EXPECTED_SCREEN 1
-#define REFRESH_RATE_IN_MS 100
-#define FULL_STOP_Delay_MS 1000
-#define SEND_START 1
-#define SEND_STOP 2
-#define SEND_IDLE 3
+//#define REFRESH_RATE_IN_MS 100
+//#define FULL_STOP_Delay_MS 1000
 
+/* KEYPAD */
 #define RESET_KEYA 'A'
 #define RESET_KEYB 'B'
 #define STOP_KEY 'D'
 #define START_KEY 'C'
 #define DP_KEY '*'
+
+/* ARDUINO PIN */
 // #define RELAY1_PIN A2
 // #define RELAY2_PIN A1
 #define RELAY1_PIN 11
@@ -28,16 +28,11 @@
 #define BUZZ 12
 #define rxPin 13
 #define txPin A0
-
 #define TRIGGER_LEVEL LOW
 
+/* STATE */
 #define STOP_STATE 0
 #define RUN_STATE 1
-#define STOPPING_STATE 2
-#define MAX_COUNT 100
-#define CONFIRMED_COUNT 10
-#define SD_CS 15
-
 
 byte key = NO_KEY;
 const byte ROWS = 4; // four rows
@@ -48,7 +43,6 @@ char keys[ROWS][COLS] = {
         {'7', '8', '9', 'C'},
         {'*', '0', '#', 'D'}
         };
-
 byte rowPins[ROWS] = {9, 8, 7, 6}; // connect to the row pinouts of the keypad
 byte colPins[COLS] = {5, 4, 3, 2}; // connect to the column pinouts of the keypad
 
@@ -59,30 +53,25 @@ enum Mode
   MODE_A = 0,
   MODE_B
 };
-
 struct device_params
 {
   float cur_weight = 0;
   float expected_weight = 0;
-  String FullTime, monthStamp, dayStamp, timeStamp, event;
   int state_run_stop = STOP_STATE;
   Mode mode = MODE_A;
-  uint8_t flag_send = 3;
 } DeviceParams;
+
 int num_dp = 2;
 bool input_dp = false;
-float input_a = 10;float input_b = 1;
-uint8_t mode_run = '\0';
+float input_a = 10;
+float input_b = 1;
 float weight[3] = {1, 2, 3};
 uint8_t count_get_weight = 0;
+
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 SoftwareSerial mySerial (rxPin, txPin);
 
-int btn_count = 0;
-long last_force_stop = 0;
-
 long last_show_cur_weight = 0;
-long last_show_state = 0;
 /********** Buffer using to read data from scale **********/
 #define MAX_LEN 100
 char msg[MAX_LEN];
@@ -117,7 +106,7 @@ void show_mode() {
   }
   }
 }
-
+/********** Reset status device when press key A **********/
 void reset_state_in() {
   DeviceParams.expected_weight = 0;
   input_dp = false;
@@ -125,6 +114,7 @@ void reset_state_in() {
   input_b = 1;
   DeviceParams.mode = MODE_A;
 }
+
 /********** Reset status device when press key B **********/
 void reset_state_out() {
   DeviceParams.expected_weight = 0;
@@ -133,27 +123,20 @@ void reset_state_out() {
   input_b = 1;
   DeviceParams.mode = MODE_B;
 }
-/********** Dispaly device status **********/
 
-void show_state() {
-  if (millis() - last_show_state < 2 * REFRESH_RATE_IN_MS) {
-    return;
-  }
-  last_show_state = millis();
-
-  lcd.setCursor(8, 3);
-  if (DeviceParams.state_run_stop == STOP_STATE) {
-    lcd.print("STOP");
-  }
-  if (DeviceParams.state_run_stop == RUN_STATE) {
-    lcd.print("RUN ");
-  }
-}
-/********** On Relay **********/
+/********** Turn on Relay **********/
 void onRelay() {
     digitalWrite(RELAY1_PIN, TRIGGER_LEVEL);
     digitalWrite(RELAY2_PIN, TRIGGER_LEVEL);
     Serial.println("ON RELAY");
+}
+
+/********** Turn off relay **********/
+void offRelay() {
+    digitalWrite(RELAY1_PIN, HIGH);
+    delay(500);
+    digitalWrite(RELAY2_PIN, HIGH);
+    Serial.println("OFF RELAY");
 }
 
 /********** Convert float number to String and show **********/
@@ -171,14 +154,6 @@ void show_float(int addr, float x) {
   }
 }
 
-void setup() {
-  Serial.begin(9600);
-  mySerial.begin(9600);
-  lcd.init();
-  // Print a message to the LCD.
-  lcd.backlight();
-  show_mode();
-}
 /********** Get data and parse from Ampcells Scale Indicator **********/
 bool update_cur_weight() {
   char c;
@@ -238,18 +213,11 @@ bool update_cur_weight() {
   }
   return false;
 }
-/********** Turn off relay **********/
-void offRelay() {
-    digitalWrite(RELAY1_PIN, HIGH);
-    delay(500);
-    digitalWrite(RELAY2_PIN, HIGH);
-    Serial.println("OFF RELAY");
-}
+
 /********** Stop device **********/
 void force_stop() {
   offRelay();
   if (DeviceParams.state_run_stop == RUN_STATE) { // get_time();
-    DeviceParams.flag_send = SEND_STOP;
     DeviceParams.state_run_stop = STOP_STATE;
   
     Serial.print("KL send in time stop task loop:");
@@ -257,6 +225,7 @@ void force_stop() {
   }
 }
 
+/********** Check if scale get the expected weight **********/
 bool check_cond_stop() {
   if (DeviceParams.mode == MODE_A) { // bom vao
     if (DeviceParams.cur_weight >= DeviceParams.expected_weight) {
@@ -276,17 +245,15 @@ void start_run() {
     return;
   }
   if (DeviceParams.state_run_stop == STOP_STATE) {
-    DeviceParams.flag_send = SEND_START;
     DeviceParams.state_run_stop = RUN_STATE;
     //Update weight to EEPROM
     if (DeviceParams.expected_weight != EEPROM.read(0)) {
       EEPROM.write(0, DeviceParams.expected_weight);
     }
   }
-
-  show_state();
   onRelay();
 }
+
 /********** Get button **********/
 bool update_key(char key) {
   //Press C on keypad and state is running
@@ -340,16 +307,25 @@ bool update_key(char key) {
   }
   return false;
 }
+
+void setup() {
+  Serial.begin(9600);
+  mySerial.begin(9600);
+  lcd.init();
+  lcd.backlight();
+  show_mode();
+}
+
 void loop() {
   
-  //update weight and show on LCD
+  // Update weight and show on LCD
   if (update_cur_weight()) {
     if (millis() - last_show_cur_weight > 150) {
       show_float(CUR_SCREEN, DeviceParams.cur_weight);
     }
   }
   
-  //Read value from keypad
+  // Read value from keypad
   key = my_keypad.getKey();
 
   if (key != NO_KEY) {
@@ -358,10 +334,10 @@ void loop() {
     }
   }
 
+  // Check if the scale get the expected weight
   if (DeviceParams.state_run_stop == RUN_STATE) {
     if (check_cond_stop()) {
       force_stop();
     }
   }
-  //show_state();
 }
