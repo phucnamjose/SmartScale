@@ -246,7 +246,7 @@ void start_run() {
   }
   if (DeviceParams.state_run_stop == STOP_STATE) {
     DeviceParams.state_run_stop = RUN_STATE;
-    //Update weight to EEPROM
+    // Update weight to EEPROM
     if (DeviceParams.expected_weight != EEPROM.read(0)) {
       EEPROM.write(0, DeviceParams.expected_weight);
     }
@@ -256,12 +256,12 @@ void start_run() {
 
 /********** Get button **********/
 bool update_key(char key) {
-  //Press C on keypad and state is running
+  //Press 'D' on keypad and state is running
   if ((key == STOP_KEY) && (DeviceParams.state_run_stop == RUN_STATE)) {
     force_stop();
     return true;
   }
-  //Press A to choose mode A: "BOM"
+  //Press 'A' to choose mode A: "BOM"
   if (key == RESET_KEYA) {
     force_stop();
     reset_state_in();
@@ -269,7 +269,7 @@ bool update_key(char key) {
     show_mode();
     return true;
   }
-  //Press B to choose mode B: "HUT"
+  //Press 'B' to choose mode B: "HUT"
   if (key == RESET_KEYB) {
     force_stop();
     reset_state_out();
@@ -277,23 +277,25 @@ bool update_key(char key) {
     show_mode();
     return true;
   }
-
+  //When running, device ignore the entering number. Stop it first
   if (DeviceParams.state_run_stop == RUN_STATE) {
     return false;
   }
-
+  //Press 'C' to start
   if (key == START_KEY) {
     start_run();
     return true;
   }
-
+  //Press '*' to enter '.'
   if (key == DP_KEY) {
     input_dp = true;
     input_a = 1;
     input_b = 0.1;
     return true;
   }
-
+  //Press '#': reserve
+  
+  //Entering number
   if (isDigit(key)) {
     //Allow input decimal value
     DeviceParams.expected_weight = DeviceParams.expected_weight * input_a + (key - '0') * input_b;
