@@ -19,10 +19,8 @@
 #define DP_KEY '*'
 
 /* ARDUINO PIN */
-// #define RELAY1_PIN A2
-// #define RELAY2_PIN A1
-#define RELAY1_PIN 11
-#define RELAY2_PIN 12
+#define RELAY1_PIN A2
+#define RELAY2_PIN A1
 #define LED_START 10
 #define LED_STOP 11
 #define BUZZ 12
@@ -43,8 +41,8 @@ char keys[ROWS][COLS] = {
         {'7', '8', '9', 'C'},
         {'*', '0', '#', 'D'}
         };
-byte rowPins[ROWS] = {9, 8, 7, 6}; // connect to the row pinouts of the keypad
-byte colPins[COLS] = {5, 4, 3, 2}; // connect to the column pinouts of the keypad
+byte rowPins[ROWS] = {2, 3, 4, 5}; // connect to the row pinouts of the keypad
+byte colPins[COLS] = {6, 7, 8, 9}; // connect to the column pinouts of the keypad
 
 Keypad my_keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
@@ -100,8 +98,11 @@ void show_mode() {
   }
   default:
   {
+    EEPROM.write(5, RESET_KEYA);
     lcd.setCursor(0, 0);
-    lcd.print("CHUA CHON");
+    lcd.print("A-BOM");
+    lcd.setCursor(0, 1);
+    lcd.print("     ");
     break;
   }
   }
@@ -313,6 +314,16 @@ bool update_key(char key) {
 void setup() {
   Serial.begin(9600);
   mySerial.begin(9600);
+  pinMode(RELAY1_PIN,OUTPUT);
+  pinMode(RELAY2_PIN,OUTPUT);
+  pinMode(LED_START,OUTPUT);
+  pinMode(LED_STOP,OUTPUT);
+  pinMode(BUZZ,OUTPUT);
+  digitalWrite(BUZZ,HIGH);
+  digitalWrite(RELAY1_PIN,HIGH);
+  digitalWrite(RELAY2_PIN,HIGH);
+  digitalWrite(LED_START,HIGH);
+  digitalWrite(LED_STOP,HIGH);
   lcd.init();
   lcd.backlight();
   show_mode();
