@@ -34,6 +34,7 @@
 #define TIME_DELAY_MS_RELAY 500
 #define TIME_DELAY_MS_BUZZ 50
 #define TIME_DELAY_MS_LED 50
+#define TIMEOUT_MS_NO_DATA_FROM_SCALE 2000
 
 byte key = NO_KEY;
 const byte ROWS = 4; // four rows
@@ -367,6 +368,11 @@ void loop() {
   if (update_cur_weight()) {
     if (millis() - last_show_cur_weight > 150) {
       show_float(CUR_SCREEN, DeviceParams.cur_weight);
+    }
+  } else {
+    if (millis() - last_show_cur_weight > TIMEOUT_MS_NO_DATA_FROM_SCALE) {
+      lcd.setCursor(6, CUR_SCREEN);
+      lcd.print("  NO DATA");
     }
   }
   
