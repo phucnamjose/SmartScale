@@ -33,10 +33,11 @@
 #define RUN_STATE 1
 
 /* SYSTEM */
-#define TIME_DELAY_MS_RELAY 500
+#define TIME_DELAY_MS_RELAY 1000
 #define TIME_DELAY_MS_SOUND_EFFECT 10
-#define TIME_DELAY_MS_LED 50
 #define TIMEOUT_MS_NO_DATA_FROM_SCALE 2000
+#define TIMEO_DELAY_MS_LED_BLINK_ON 500
+#define TIMEO_DELAY_MS_LED_BLINK_OFF 500
 
 byte key = NO_KEY;
 const byte ROWS = 4; // four rows
@@ -75,17 +76,115 @@ uint8_t count_get_weight = 0;
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 SoftwareSerial mySerial (rxPin, txPin);
 
+enum Led_Bright
+{
+  LED_BRIGHT_ONLY_GREEN = 0,
+  LED_BRIGHT_ONLY_RED,
+  LED_BRIGHT_BOTH
+};
+
+enum Led_Mode
+{
+  LED_MODE_OFF = 0,
+  LED_MODE_BLINK,
+  LED_MODE_CONTINUOUS
+};
+struct led_params
+{
+  Led_Bright bright = LED_BRIGHT_ONLY_RED;
+  Led_Mode mode = LED_MODE_CONTINUOUS;
+  unsigned long last_on;
+  unsigned long last_off;
+  unsigned long last_start_blink;
+  unsigned long time_blink = 2000;//ms
+  bool isOn = true;
+} Led;
+
 long last_show_cur_weight = 0;
 
 bool turning_off_relay = false;
-long last_off_relay_1 = 0;
+unsigned long last_off_relay_1 = 0;
 
 bool turning_sound_effect = false;
-long last_sound_effect = 0;
+unsigned long last_sound_effect = 0;
 /********** Buffer using to read data from scale **********/
 #define MAX_LEN 100
 char msg[MAX_LEN];
 int msg_len = 0;
+
+/********** Sound Effect **********/
+void onKeySoundEffect() {
+  digitalWrite(BUZZ, LOW);
+  turning_sound_effect = true;
+  last_sound_effect = millis();
+}
+
+void checkTimeOffKeySoundEffect() {
+  if (millis() - last_sound_effect > TIME_DELAY_MS_SOUND_EFFECT) {
+    digitalWrite(BUZZ, HIGH);
+    turning_sound_effect = false;
+  }
+}
+
+/********** LED Effect **********/
+void ledOperate() {
+  uint8_t next_level;
+  if (Led.isOn) {
+    next_level = HIGH;
+  } else {
+    next_level = LOW;
+  }
+
+  if (Led.bright == LED_BRIGHT_ONLY_GREEN) {
+    digitalWrite(LED_START, next_level);
+    digitalWrite(LED_STOP, LOW);
+  } else if (Led.bright == LED_BRIGHT_ONLY_RED) {
+    digitalWrite(LED_STOP, next_level);
+    digitalWrite(LED_START, LOW);
+  } else {
+    digitalWrite(LED_START, next_level);
+    digitalWrite(LED_STOP, next_level);
+  }
+}
+
+void ledChangeState(uint8_t device_state) {
+  if (DeviceParams.state_run_stop == RUN_STATE) {
+    Led.bright = LED_BRIGHT_ONLY_GREEN;
+  } else {
+    Led.bright = LED_BRIGHT_ONLY_RED;
+  }
+  // Blink when state change
+  Led.mode = LED_MODE_BLINK;
+  Led.time_blink = 2000;//ms
+  Led.last_start_blink = millis();
+  Led.last_on = millis();
+  Led.isOn = true;
+  ledOperate();
+}
+
+void ledCheckTimeBlinkSwitch() {
+  if (Led.isOn) {
+    if (millis() - Led.last_on > TIMEO_DELAY_MS_LED_BLINK_ON) {
+      Led.isOn = false;
+      Led.last_off = millis();
+      ledOperate();
+    }
+  } else {
+    if (millis() - Led.last_off > TIMEO_DELAY_MS_LED_BLINK_OFF) {
+      Led.isOn = true;
+      Led.last_on = millis();
+      ledOperate();
+    }
+  }
+}
+
+void ledCheckTimeEndBlink() {
+  if (millis() - Led.last_start_blink > Led.time_blink) {
+    Led.mode = LED_MODE_CONTINUOUS;
+    Led.isOn = true;
+    ledOperate();
+  }
+}
 
 /********** Display running mode **********/
 void show_mode() {
@@ -240,7 +339,7 @@ void force_stop() {
   offRelay();
   if (DeviceParams.state_run_stop == RUN_STATE) { // get_time();
     DeviceParams.state_run_stop = STOP_STATE;
-  
+    ledChangeState(STOP_STATE);
     Serial.print("KL send in time stop task loop:");
     Serial.println(DeviceParams.cur_weight);
   }
@@ -273,6 +372,7 @@ void start_run() {
     }
   }
   onRelay();
+  ledChangeState(RUN_STATE);
 }
 
 /********** Get button **********/
@@ -331,49 +431,41 @@ bool update_key(char key) {
   return false;
 }
 
-void onKeySoundEffect() {
-  digitalWrite(BUZZ, LOW);
-  turning_sound_effect = true;
-  last_sound_effect = millis();
-}
-
-void checkTimeOffKeySoundEffect() {
-  if (millis() - last_sound_effect > TIME_DELAY_MS_SOUND_EFFECT) {
-    digitalWrite(BUZZ, HIGH);
-    turning_sound_effect = false;
-  }
-}
 void setup() {
   Serial.begin(9600);
   mySerial.begin(9600);
   // Relay
   pinMode(RELAY1_PIN, OUTPUT);
   digitalWrite(RELAY1_PIN, HIGH);
-  pinMode(RELAY2_PIN,OUTPUT);
-  digitalWrite(RELAY2_PIN,HIGH);
+  pinMode(RELAY2_PIN, OUTPUT);
+  digitalWrite(RELAY2_PIN, HIGH);
   // Led
-  pinMode(LED_START,OUTPUT);
-  pinMode(LED_STOP,OUTPUT);
-  digitalWrite(LED_START,HIGH);
-  digitalWrite(LED_STOP,HIGH);
+  pinMode(LED_START, OUTPUT);
+  pinMode(LED_STOP, OUTPUT);
+  digitalWrite(LED_START, HIGH);
+  digitalWrite(LED_STOP, HIGH);
   // Buzzer
-  pinMode(BUZZ,OUTPUT);
-  digitalWrite(BUZZ,LOW);
+  pinMode(BUZZ, OUTPUT);
+  digitalWrite(BUZZ, LOW);
   delay(40);
-  digitalWrite(BUZZ,HIGH);
+  digitalWrite(BUZZ, HIGH);
   delay(100);
-  digitalWrite(BUZZ,LOW);
+  digitalWrite(BUZZ, LOW);
   delay(40);
-  digitalWrite(BUZZ,HIGH);
+  digitalWrite(BUZZ, HIGH);
   // LCD
   lcd.init();
   lcd.backlight();
+  // Say Hello
   lcd.setCursor(1, 0);
   lcd.print("SCALE INDICATOR");
   delay(1000);
   lcd.clear();
+  digitalWrite(LED_START, LOW);
+  digitalWrite(LED_STOP, LOW);
   delay(700);
   show_mode();
+  ledOperate();
 }
 
 void loop() {
@@ -415,6 +507,12 @@ void loop() {
   // Check off the second relay
   if (turning_off_relay) {
     checkTimeOffRelay2();
+  }
+  
+  // LED Effect
+  if (Led.mode == LED_MODE_BLINK) {
+    ledCheckTimeBlinkSwitch();
+    ledCheckTimeEndBlink();
   }
   
   
