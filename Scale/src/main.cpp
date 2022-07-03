@@ -8,8 +8,6 @@
 /* LCD */
 #define CUR_SCREEN 0
 #define EXPECTED_SCREEN 1
-//#define REFRESH_RATE_IN_MS 100
-//#define FULL_STOP_Delay_MS 1000
 
 /* KEYPAD */
 #define RESET_KEYA 'A'
@@ -31,6 +29,11 @@
 /* STATE */
 #define STOP_STATE 0
 #define RUN_STATE 1
+
+/* SYSTEM */
+#define TIME_DELAY_MS_RELAY 500
+#define TIME_DELAY_MS_BUZZ 50
+#define TIME_DELAY_MS_LED 50
 
 byte key = NO_KEY;
 const byte ROWS = 4; // four rows
@@ -70,6 +73,12 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 SoftwareSerial mySerial (rxPin, txPin);
 
 long last_show_cur_weight = 0;
+
+bool turning_off_relay = false;
+long last_off_relay_1 = 0;
+
+bool turning_on_buzzer = false;
+long last_on_buzzer = 0;
 /********** Buffer using to read data from scale **********/
 #define MAX_LEN 100
 char msg[MAX_LEN];
@@ -135,9 +144,17 @@ void onRelay() {
 /********** Turn off relay **********/
 void offRelay() {
     digitalWrite(RELAY1_PIN, HIGH);
-    delay(500);
+    turning_off_relay = true;
+    last_off_relay_1 = millis();
+    Serial.println("OFF RELAY 1");
+}
+
+void checkTimeOffRelay2() {
+  if (millis() - last_off_relay_1 > TIME_DELAY_MS_RELAY) {
     digitalWrite(RELAY2_PIN, HIGH);
-    Serial.println("OFF RELAY");
+    turning_off_relay = false;
+    Serial.println("OFF RELAY 2");
+  }   
 }
 
 /********** Convert float number to String and show **********/
@@ -314,18 +331,33 @@ bool update_key(char key) {
 void setup() {
   Serial.begin(9600);
   mySerial.begin(9600);
+  // Relay
   pinMode(RELAY1_PIN,OUTPUT);
+  digitalWrite(RELAY1_PIN,HIGH);
   pinMode(RELAY2_PIN,OUTPUT);
+  digitalWrite(RELAY2_PIN,HIGH);
+  // Led
   pinMode(LED_START,OUTPUT);
   pinMode(LED_STOP,OUTPUT);
-  pinMode(BUZZ,OUTPUT);
-  digitalWrite(BUZZ,HIGH);
-  digitalWrite(RELAY1_PIN,HIGH);
-  digitalWrite(RELAY2_PIN,HIGH);
   digitalWrite(LED_START,HIGH);
   digitalWrite(LED_STOP,HIGH);
+  // Buzzer
+  pinMode(BUZZ,OUTPUT);
+  digitalWrite(BUZZ,LOW);
+  delay(40);
+  digitalWrite(BUZZ,HIGH);
+  delay(100);
+  digitalWrite(BUZZ,LOW);
+  delay(40);
+  digitalWrite(BUZZ,HIGH);
+  // LCD
   lcd.init();
   lcd.backlight();
+  lcd.setCursor(1, 0);
+  lcd.print("SCALE INDICATOR");
+  delay(1000);
+  lcd.clear();
+  delay(700);
   show_mode();
 }
 
@@ -346,6 +378,8 @@ void loop() {
       show_float(EXPECTED_SCREEN, DeviceParams.expected_weight);
     }
   }
+  // Keyboard effect
+
 
   // Check if the scale get the expected weight
   if (DeviceParams.state_run_stop == RUN_STATE) {
@@ -353,4 +387,11 @@ void loop() {
       force_stop();
     }
   }
+
+  // Check off the second relay
+  if (turning_off_relay) {
+    checkTimeOffRelay2();
+  }
+  
+  
 }
