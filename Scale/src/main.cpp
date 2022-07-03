@@ -25,6 +25,8 @@
 #define rxPin 13
 #define txPin A0
 #define TRIGGER_LEVEL LOW
+#define BUZZ_ON_LEVEL LOW
+#define LED_ON_LEVEL HIGH
 
 /* STATE */
 #define STOP_STATE 0
@@ -32,7 +34,7 @@
 
 /* SYSTEM */
 #define TIME_DELAY_MS_RELAY 500
-#define TIME_DELAY_MS_BUZZ 50
+#define TIME_DELAY_MS_SOUND_EFFECT 10
 #define TIME_DELAY_MS_LED 50
 #define TIMEOUT_MS_NO_DATA_FROM_SCALE 2000
 
@@ -78,8 +80,8 @@ long last_show_cur_weight = 0;
 bool turning_off_relay = false;
 long last_off_relay_1 = 0;
 
-bool turning_on_buzzer = false;
-long last_on_buzzer = 0;
+bool turning_sound_effect = false;
+long last_sound_effect = 0;
 /********** Buffer using to read data from scale **********/
 #define MAX_LEN 100
 char msg[MAX_LEN];
@@ -329,12 +331,24 @@ bool update_key(char key) {
   return false;
 }
 
+void onKeySoundEffect() {
+  digitalWrite(BUZZ, LOW);
+  turning_sound_effect = true;
+  last_sound_effect = millis();
+}
+
+void checkTimeOffKeySoundEffect() {
+  if (millis() - last_sound_effect > TIME_DELAY_MS_SOUND_EFFECT) {
+    digitalWrite(BUZZ, HIGH);
+    turning_sound_effect = false;
+  }
+}
 void setup() {
   Serial.begin(9600);
   mySerial.begin(9600);
   // Relay
-  pinMode(RELAY1_PIN,OUTPUT);
-  digitalWrite(RELAY1_PIN,HIGH);
+  pinMode(RELAY1_PIN, OUTPUT);
+  digitalWrite(RELAY1_PIN, HIGH);
   pinMode(RELAY2_PIN,OUTPUT);
   digitalWrite(RELAY2_PIN,HIGH);
   // Led
@@ -382,9 +396,13 @@ void loop() {
   if (key != NO_KEY) {
     if (update_key(key)) {
       show_float(EXPECTED_SCREEN, DeviceParams.expected_weight);
+      onKeySoundEffect();
     }
   }
   // Keyboard effect
+  if (turning_sound_effect) {
+    checkTimeOffKeySoundEffect();
+  }
 
 
   // Check if the scale get the expected weight
